@@ -1,6 +1,5 @@
 import cv2
-import numpy as np
-import matplotlib.pyplot as plt
+import cupy as cp
 import os
 import random
 
@@ -26,8 +25,9 @@ def read_in_images(directory):
         full_path = vehicle_dir + "/" + filename
         img = cv2.imread(full_path, 0)
         out = hog.compute(img)
-        out = np.transpose(out)
-        list.append((out, (0, 1)))
+        out = cp.transpose(out)
+        out = cp.array(out)
+        list.append((out, cp.array((0, 1))))
         sum += 1
         if sum % 100 == 0:
             print("Loaded " + str(sum) + " images")
@@ -36,8 +36,9 @@ def read_in_images(directory):
         full_path = non_dir + "/" + filename
         img = cv2.imread(full_path, 0)
         out = hog.compute(img)
-        out = np.transpose(out)
-        list.append((out, (1, 0)))
+        out = cp.transpose(out)
+        out = cp.array(out)
+        list.append((out, cp.array((1, 0))))
         sum += 1
         if sum % 100 == 0:
             print("Loaded " + str(sum) + " images")
@@ -46,22 +47,22 @@ def read_in_images(directory):
 
 
 def sigmoid(input):
-    return 1 / (1 + np.exp(-input))
+    return 1 / (1 + cp.exp(-input))
 
 
 def randomly_initialize_w(n_input_neurons, n_hidden_neurons, n_output_neurons):
-    W_1 = np.random.normal(loc=0, scale=1, size=(n_input_neurons, n_hidden_neurons))
-    W_2 = np.random.normal(loc=0, scale=1, size=(n_hidden_neurons, n_output_neurons))
-    B_hidden = np.random.normal(loc=0, scale=1, size=(1, n_hidden_neurons))
-    B_output = np.random.normal(loc=0, scale=1, size=(1, n_output_neurons))
+    W_1 = cp.random.normal(loc=0, scale=1, size=(n_input_neurons, n_hidden_neurons))
+    W_2 = cp.random.normal(loc=0, scale=1, size=(n_hidden_neurons, n_output_neurons))
+    B_hidden = cp.random.normal(loc=0, scale=1, size=(1, n_hidden_neurons))
+    B_output = cp.random.normal(loc=0, scale=1, size=(1, n_output_neurons))
     return W_1, W_2, B_hidden, B_output
 
 
 def forward_pass(W_output, W_hidden, B_hidden, B_output, x):
-    net_hidden = np.dot(x, W_hidden) + B_hidden
+    net_hidden = cp.dot(x, W_hidden) + B_hidden
     out_hidden = sigmoid(net_hidden)
 
-    net_output = np.dot(out_hidden, W_output) + B_output
+    net_output = cp.dot(out_hidden, W_output) + B_output
     out_output = sigmoid(net_output)
 
     return out_hidden, out_output
@@ -70,24 +71,24 @@ def forward_pass(W_output, W_hidden, B_hidden, B_output, x):
 def backward_pass(x, y, output, hidden_output, W_output):
     output_error = -(y - output)  # Calculate error
     output_over_net = output*(1 - output)  # Derivative of sigmoid function
-    sigmoid_on_error = np.multiply(output_error, output_over_net)  # Calculate the sigmoid function's affect on error
+    sigmoid_on_error = cp.multiply(output_error, output_over_net)  # Calculate the sigmoid function's affect on error
 
-    W_output = np.transpose(W_output)
-    hidden_error = np.dot(sigmoid_on_error, W_output)  # Calculate the affect of output weights on hidden weights' error
+    W_output = cp.transpose(W_output)
+    hidden_error = cp.dot(sigmoid_on_error, W_output)  # Calculate the affect of output weights on hidden weights' error
     hidden_over_net = hidden_output*(1 - hidden_output)  # Derivative of sigmoid function
-    sigmoid_on_hidden_error = np.multiply(hidden_error, hidden_over_net)  # Calculate the sigmoid function's affect on error
+    sigmoid_on_hidden_error = cp.multiply(hidden_error, hidden_over_net)  # Calculate the sigmoid function's affect on error
 
     # Correctly arrange matrices for calculations
-    x = np.atleast_2d(x)
-    hidden_output = np.atleast_2d(hidden_output)
-    x_transpose = np.transpose(x)
-    hidden_output_transpose = np.transpose(hidden_output)
+    x = cp.atleast_2d(x)
+    hidden_output = cp.atleast_2d(hidden_output)
+    x_transpose = cp.transpose(x)
+    hidden_output_transpose = cp.transpose(hidden_output)
     sigmoid_on_hidden_error = sigmoid_on_hidden_error.reshape(1, sigmoid_on_hidden_error.size)
     sigmoid_on_error = sigmoid_on_error.reshape(1, sigmoid_on_error.size)
 
     # Calculate weight changes
-    W_hidden_c = np.dot(x_transpose, sigmoid_on_hidden_error)
-    W_output_c = np.dot(hidden_output_transpose, sigmoid_on_error)
+    W_hidden_c = cp.dot(x_transpose, sigmoid_on_hidden_error)
+    W_output_c = cp.dot(hidden_output_transpose, sigmoid_on_error)
 
     # Calculate bias changes
     B_hidden_c = sigmoid_on_hidden_error
@@ -98,7 +99,7 @@ def backward_pass(x, y, output, hidden_output, W_output):
 
 def predict_if_car(W_output, W_hidden, B_hidden, B_output, x):
     hidden, out = forward_pass(W_output, W_hidden, B_hidden, B_output, x)
-    prediction = np.argmax(out)
+    prediction = cp.argmax(out)
     return prediction
 
 
@@ -107,7 +108,7 @@ if __name__ == "__main__":
     random.shuffle(images)
 
     n_input_neurons = feature_size
-    n_hidden_neurons = 128
+    n_hidden_neurons = 64
     n_output_neurons = 2
     learning_rate = 1
 
@@ -142,17 +143,19 @@ if __name__ == "__main__":
         y = tuple[1]
         out_hidden, out_output = forward_pass(W_output, W_hidden, B_hidden, B_output, x)
 
-        prediction = np.argmax(out_output)
+        prediction = cp.argmax(out_output)
 
         if prediction == 1:
             # Predicted vehicle
-            if y == (0, 1):
+            comparison = y == cp.array((0, 1))
+            if comparison.all():
                 correct += 1
             else:
                 incorrect += 1
         else:
             # Predicted non-vehicle
-            if y == (1, 0):
+            comparison = y == cp.array((1, 0))
+            if comparison.all():
                 correct += 1
             else:
                 incorrect += 1
@@ -162,3 +165,38 @@ if __name__ == "__main__":
     print(str(incorrect) + " incorrectly identified")
     percentage = (correct/(correct+incorrect))*100
     print(str(percentage) + "% accuracy")
+
+    file = open("weights.txt", 'w')
+    string = str(W_output.shape[0]) + " " + str(W_output.shape[1]) + "\n"
+    file.write(string)
+    for x in range(0, W_output.shape[0]):
+        for y in range(0, W_output.shape[1]):
+            string = str(W_output[x][y]) + " "
+            file.write(string)
+    file.write("\n")
+
+    string = str(W_hidden.shape[0]) + " " + str(W_hidden.shape[1]) + "\n"
+    file.write(string)
+    for x in range(0, W_hidden.shape[0]):
+        for y in range(0, W_hidden.shape[1]):
+            string = str(W_hidden[x][y]) + " "
+            file.write(string)
+    file.write("\n")
+
+    string = str(B_output.shape[0]) + " " + str(B_output.shape[1]) + "\n"
+    file.write(string)
+    for x in range(0, B_output.shape[0]):
+        for y in range(0, B_output.shape[1]):
+            string = str(B_output[x][y]) + " "
+            file.write(string)
+    file.write("\n")
+
+    string = str(B_hidden.shape[0]) + " " + str(B_hidden.shape[1]) + "\n"
+    file.write(string)
+    for x in range(0, B_hidden.shape[0]):
+        for y in range(0, B_hidden.shape[1]):
+            string = str(B_hidden[x][y]) + " "
+            file.write(string)
+    file.write("\n")
+
+    file.close()
