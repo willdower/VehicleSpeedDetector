@@ -2,7 +2,11 @@ import cv2
 import cupy as cp
 import os
 import random
+import numpy as np
 
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
 
 def read_in_images(directory):
     vehicle_dir = directory + "/vehicle"
@@ -45,6 +49,57 @@ def read_in_images(directory):
 
     return feature_size, list
 
+
+def read_in_images_new(directory):
+    vehicle_dir = directory + "/vehicle"
+    non_dir = directory + "/non"
+
+    win_size = 64
+    win_size_tuple = (win_size, win_size)
+    cell_size = 8
+    cell_size_tuple = (cell_size, cell_size)
+    block_size = (cell_size*2, cell_size*2)
+    block_stride = (cell_size, cell_size)
+    nbins = 9
+    feature_size = int(9 * (4 + ((((win_size/cell_size)-2)*4)*2) + ((((win_size/cell_size)-2) * ((win_size/cell_size)-2))*4)))
+
+    hog = cv2.HOGDescriptor(win_size_tuple, block_size, block_stride, cell_size_tuple, nbins)
+
+    sum = 0
+    for filename in os.listdir(vehicle_dir):
+        sum += 1
+    for filename in os.listdir(non_dir):
+        sum += 1
+
+    x_array = np.zeros((sum, feature_size))
+    y_array = np.zeros((sum, 2))
+
+    sum = 0
+    for filename in os.listdir(vehicle_dir):
+        full_path = vehicle_dir + "/" + filename
+        img = cv2.imread(full_path, 0)
+        out = hog.compute(img)
+        out = np.transpose(out)
+        out = np.array(out)
+        x_array[sum] = out
+        y_array[sum] = np.array([0, 1])
+        sum += 1
+        if sum % 100 == 0:
+            print("Loaded " + str(sum) + " images")
+
+    for filename in os.listdir(non_dir):
+        full_path = non_dir + "/" + filename
+        img = cv2.imread(full_path, 0)
+        out = hog.compute(img)
+        out = np.transpose(out)
+        out = np.array(out)
+        x_array[sum] = out
+        y_array[sum] = np.array([1, 0])
+        sum += 1
+        if sum % 100 == 0:
+            print("Loaded " + str(sum) + " images")
+
+    return feature_size, x_array, y_array
 
 def sigmoid(input):
     return 1 / (1 + cp.exp(-input))
@@ -103,7 +158,7 @@ def predict_if_car(W_output, W_hidden, B_hidden, B_output, x):
     return prediction
 
 
-if __name__ == "__main__":
+if __name__ == "!__main__":
     feature_size, images = read_in_images("imgs")
     random.shuffle(images)
 
@@ -135,10 +190,11 @@ if __name__ == "__main__":
             print("Trained on " + str(sum) + " images, " + str(total-sum) + " remaining")
 
     print("\nBeginning testing...")
-    random.shuffle(images)
+    test_feature_size, test_images = read_in_images("test_imgs")
+    random.shuffle(test_images)
     correct = 0
     incorrect = 0
-    for tuple in images:
+    for tuple in test_images:
         x = tuple[0]
         y = tuple[1]
         out_hidden, out_output = forward_pass(W_output, W_hidden, B_hidden, B_output, x)
@@ -200,3 +256,38 @@ if __name__ == "__main__":
     file.write("\n")
 
     file.close()
+
+if __name__ == "__main__":
+
+    feature_size, x_train, y_train = read_in_images_new("imgs")
+    feature_size_test, x_test, y_test = read_in_images_new("test_imgs")
+
+    inputs = keras.Input(shape=(feature_size,), name="imgs")
+    x = layers.Dense(32, activation="relu", name="dense_1")(inputs)
+    outputs = layers.Dense(2, activation="softmax", name="predictions")(x)
+    model = keras.Model(inputs=inputs, outputs=outputs)
+
+    y_train = np.argmax(y_train, axis=1)
+    y_test = np.argmax(y_test, axis=1)
+
+    x_val = x_train[-1000:]
+    y_val = y_train[-1000:]
+    x_train = x_train[:-1000]
+    y_train = y_train[:-1000]
+
+    model.compile(
+        optimizer=keras.optimizers.RMSprop(),
+        loss=keras.losses.SparseCategoricalCrossentropy(),
+        metrics=[keras.metrics.SparseCategoricalAccuracy()],
+    )
+
+    history = model.fit(
+        x_train,
+        y_train,
+        batch_size=64,
+        epochs=2,
+        validation_data=(x_val, y_val),
+    )
+
+    results = model.evaluate(x_test, y_test, batch_size=128)
+    print("test loss, test acc:", results)
